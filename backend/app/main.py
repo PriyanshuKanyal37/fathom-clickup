@@ -35,6 +35,16 @@ app = FastAPI(title="Fathom ClickUp Automation", lifespan=lifespan)
 app.include_router(admin_router)
 
 
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"service": "fathom-clickup", "status": "ok"}
+
+
+@app.get("/health")
+async def public_health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 async def _process_in_background(user_id: UUID, payload: dict[str, Any]) -> None:
     async with SessionLocal() as session:
         user = await session.get(User, user_id)
