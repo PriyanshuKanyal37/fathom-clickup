@@ -189,6 +189,61 @@ def _match_content_to_members(content: str, members: list[dict[str, Any]]) -> li
     return matched
 
 
+def _match_owner_to_member_id(
+    name: str | None,
+    email: str | None,
+    members: list[dict[str, Any]],
+) -> int | None:
+    """Resolve an action-item owner (name and/or email) to a single ClickUp member id.
+
+    Returns None when there is no confident match. Tiers, most reliable first:
+      1. Email exact match (case-insensitive)
+      2. Full-name exact match (case-insensitive, whitespace-normalised)
+      3. First-name match, only if that first name is unique in the workspace
+    Ambiguous first names fall through to None rather than guessing.
+    """
+    if not members:
+        return None
+
+    if email:
+        email_lc = email.strip().lower()
+        if email_lc:
+            for m in members:
+                if (m.get("email") or "").strip().lower() == email_lc:
+                    mid = m.get("id")
+                    if mid is not None:
+                        return int(mid)
+
+    normalized = _normalize_name(name)
+    if not normalized:
+        return None
+
+    for m in members:
+        full = _normalize_name(m.get("username"))
+        if full and full == normalized:
+            mid = m.get("id")
+            if mid is not None:
+                return int(mid)
+
+    first_name_counts: dict[str, int] = {}
+    for m in members:
+        full = _normalize_name(m.get("username"))
+        if full:
+            first = full.split()[0]
+            first_name_counts[first] = first_name_counts.get(first, 0) + 1
+
+    input_first = normalized.split()[0]
+    if first_name_counts.get(input_first, 0) == 1:
+        for m in members:
+            full = _normalize_name(m.get("username"))
+            if full and full.split()[0] == input_first:
+                mid = m.get("id")
+                if mid is not None:
+                    return int(mid)
+
+    return None
+
+
 def _match_attendees_to_members(
     attendees: list[dict[str, Any]],
     members: list[dict[str, Any]],
@@ -417,6 +472,7 @@ async def process_meeting_payload(
                 {
                     "description": item.get("description") or item.get("text") or "Action item",
                     "assignee_name": (item.get("assignee") or {}).get("name"),
+                    "assignee_email": (item.get("assignee") or {}).get("email"),
                     "deadline": item.get("deadline"),
                 }
                 for item in provided_action_items
@@ -432,6 +488,7 @@ async def process_meeting_payload(
         description = _format_parent_description(payload, summary_md, meeting_date=meeting_date)
         clickup_token = user.clickup_api_token_encrypted
 
+        members: list[dict[str, Any]] = []
         assignee_ids: list[int] = []
         if settings.clickup_workspace_id:
             try:
@@ -482,13 +539,26 @@ async def process_meeting_payload(
             subtask_desc = ""
             if item.get("deadline"):
                 subtask_desc = f"Deadline: {item['deadline']}"
+
+            subtask_assignee_id = _match_owner_to_member_id(
+                item.get("assignee_name"),
+                item.get("assignee_email"),
+                members,
+            )
+            if subtask_assignee_id is None and item.get("assignee_name"):
+                logger.debug(
+                    "No ClickUp member match for subtask %r — assignee_name=%r",
+                    item["description"][:60],
+                    item["assignee_name"],
+                )
+
             await clickup_client.create_subtask(
                 clickup_token=clickup_token,
                 list_id=settings.clickup_list_id,
                 parent_task_id=task_id,
                 title=item["description"],
                 markdown_description=subtask_desc,
-                assignee_id=user.clickup_default_assignee_id,
+                assignee_id=subtask_assignee_id,
             )
 
         await mark_success(
