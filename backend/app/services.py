@@ -283,6 +283,40 @@ def _json_dump(value: Any) -> str | None:
     return json.dumps(value, ensure_ascii=False)
 
 
+async def next_clickup_sequence(session: AsyncSession, prefix: str) -> int:
+    await session.execute(
+        text(
+            """
+            INSERT INTO clickup_sequences (prefix, value)
+            VALUES (:prefix, 0)
+            ON CONFLICT(prefix) DO NOTHING
+            """
+        ),
+        {"prefix": prefix},
+    )
+    result = await session.execute(
+        text(
+            """
+            UPDATE clickup_sequences
+               SET value = value + 1
+             WHERE prefix = :prefix
+         RETURNING value
+            """
+        ),
+        {"prefix": prefix},
+    )
+    return int(result.scalar_one())
+
+
+def _format_action_checklist_item_name(task_ref: str, index: int, item: dict[str, Any]) -> str:
+    description = str(item.get("description") or "Action item").strip() or "Action item"
+    name = f"{task_ref}.{index} - {description}"
+    deadline = str(item.get("deadline") or "").strip()
+    if deadline:
+        name = f"{name} (Deadline: {deadline})"
+    return name
+
+
 async def claim_recording(session: AsyncSession, recording_id: int, user_id: UUID, payload: dict[str, Any]) -> bool:
     stmt = text(
         """
@@ -523,6 +557,13 @@ async def process_meeting_payload(
             due_date_ms=due_ms,
         )
 
+        task_ref = f"FM-{await next_clickup_sequence(session, 'FM')}"
+        await clickup_client.rename_task(
+            clickup_token=clickup_token,
+            task_id=task_id,
+            title=f"{task_ref} - {title}",
+        )
+
         if settings.clickup_date_field_id and start_ms is not None:
             try:
                 await clickup_client.set_task_custom_field(
@@ -535,31 +576,19 @@ async def process_meeting_payload(
             except Exception as exc:
                 logger.warning("Could not set custom date field on task %s: %s", task_id, exc)
 
-        for item in action_items:
-            subtask_desc = ""
-            if item.get("deadline"):
-                subtask_desc = f"Deadline: {item['deadline']}"
-
-            subtask_assignee_id = _match_owner_to_member_id(
-                item.get("assignee_name"),
-                item.get("assignee_email"),
-                members,
-            )
-            if subtask_assignee_id is None and item.get("assignee_name"):
-                logger.debug(
-                    "No ClickUp member match for subtask %r — assignee_name=%r",
-                    item["description"][:60],
-                    item["assignee_name"],
-                )
-
-            await clickup_client.create_subtask(
+        if action_items:
+            checklist_id = await clickup_client.create_checklist(
                 clickup_token=clickup_token,
-                list_id=settings.clickup_list_id,
-                parent_task_id=task_id,
-                title=item["description"],
-                markdown_description=subtask_desc,
-                assignee_id=subtask_assignee_id,
+                task_id=task_id,
+                name="Action Items",
             )
+            for index, item in enumerate(action_items, 1):
+                await clickup_client.create_checklist_item(
+                    clickup_token=clickup_token,
+                    checklist_id=checklist_id,
+                    name=_format_action_checklist_item_name(task_ref, index, item),
+                    orderindex=index - 1,
+                )
 
         await mark_success(
             session=session,

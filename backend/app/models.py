@@ -68,6 +68,13 @@ class ProcessedMeeting(SQLModel, table=True):
     )
 
 
+class ClickupSequence(SQLModel, table=True):
+    __tablename__ = "clickup_sequences"
+
+    prefix: str = Field(primary_key=True)
+    value: int = Field(default=0, nullable=False)
+
+
 class ClickupMember(SQLModel, table=True):
     __tablename__ = "clickup_members"
 

@@ -30,6 +30,8 @@ class ClickupClient:
                     await asyncio.sleep(2**attempt)
                     continue
                 response.raise_for_status()
+                if not response.content:
+                    return {}
                 return response.json()
             except (httpx.HTTPError, httpx.TimeoutException) as exc:
                 last_error = exc
@@ -111,6 +113,51 @@ class ClickupClient:
             url=f"{CLICKUP_BASE_URL}/task/{task_id}/field/{field_id}",
             token=clickup_token,
             json=body,
+        )
+
+    async def rename_task(
+        self,
+        clickup_token: str,
+        task_id: str,
+        title: str,
+    ) -> None:
+        await self._request_with_retry(
+            method="PUT",
+            url=f"{CLICKUP_BASE_URL}/task/{task_id}",
+            token=clickup_token,
+            json={"name": title},
+        )
+
+    async def create_checklist(
+        self,
+        clickup_token: str,
+        task_id: str,
+        name: str,
+    ) -> str:
+        data = await self._request_with_retry(
+            method="POST",
+            url=f"{CLICKUP_BASE_URL}/task/{task_id}/checklist",
+            token=clickup_token,
+            json={"name": name},
+        )
+        checklist = data.get("checklist") or {}
+        checklist_id = checklist.get("id") or data.get("id")
+        if not checklist_id:
+            raise RuntimeError("ClickUp checklist response missing id")
+        return str(checklist_id)
+
+    async def create_checklist_item(
+        self,
+        clickup_token: str,
+        checklist_id: str,
+        name: str,
+        orderindex: int,
+    ) -> None:
+        await self._request_with_retry(
+            method="POST",
+            url=f"{CLICKUP_BASE_URL}/checklist/{checklist_id}/checklist_item",
+            token=clickup_token,
+            json={"name": name, "orderindex": orderindex},
         )
 
     async def create_subtask(

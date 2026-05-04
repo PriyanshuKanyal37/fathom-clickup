@@ -8,7 +8,7 @@ When a team member ends a Fathom-recorded meeting, a webhook fires into this ser
 2. Dedupes against prior deliveries (race-safe via Postgres primary key)
 3. Uses Fathom's AI summary + action items when available, or falls back to an OpenAI LLM (Fathom-style structure: Meeting Purpose / Key Takeaways / Topics / Next Steps)
 4. Generates a meaningful meeting title with the LLM when Fathom gives a generic one ("Impromptu Google Meet Meeting" → "ClickUp Brain AI Project Onboarding")
-5. Creates a ClickUp parent task (title, dates in IST, description, assignees matched from attendees + transcript speakers) plus one subtask per action item
+5. Creates a ClickUp parent task with an `FM-N` prefix (title, dates in IST, description, assignees matched from attendees + transcript speakers) plus checklist items for action items
 
 ## Stack
 
