@@ -160,6 +160,24 @@ class ClickupClient:
             json={"name": name, "orderindex": orderindex},
         )
 
+    async def upload_task_attachment(
+        self,
+        clickup_token: str,
+        task_id: str,
+        filename: str,
+        content: str,
+        content_type: str,
+    ) -> None:
+        headers = {"Authorization": clickup_token}
+        files = {"attachment": (filename, content.encode("utf-8"), content_type)}
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.post(
+                f"{CLICKUP_BASE_URL}/task/{task_id}/attachment",
+                headers=headers,
+                files=files,
+            )
+        response.raise_for_status()
+
     async def create_subtask(
         self,
         clickup_token: str,

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clickup import ClickupClient
 from app.config import get_settings
+from app.fathom import FathomClient
 from app.llm import extract_action_items, generate_meeting_title, summarize_meeting, transcript_to_text
 from app.models import User
 
@@ -283,6 +284,51 @@ def _json_dump(value: Any) -> str | None:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _format_transcript_attachment(payload: dict[str, Any], transcript: list[Any]) -> str:
+    title = _fathom_title(payload)
+    recording_id = payload.get("recording_id", "")
+    lines = [
+        f"Fathom transcript",
+        f"Recording ID: {recording_id}",
+        f"Title: {title}",
+        "",
+    ]
+
+    for item in transcript:
+        if not isinstance(item, dict):
+            lines.append(str(item))
+            continue
+        timestamp = item.get("timestamp") or item.get("recording_timestamp") or "--:--:--"
+        speaker = item.get("speaker") or {}
+        speaker_name = speaker.get("display_name") if isinstance(speaker, dict) else None
+        text = item.get("text") or ""
+        lines.append(f"[{timestamp}] {speaker_name or 'Unknown'}: {text}")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+async def _ensure_payload_transcript(
+    payload: dict[str, Any],
+    user: User,
+    fathom_client: FathomClient,
+) -> list[Any]:
+    transcript = payload.get("transcript")
+    if isinstance(transcript, list) and transcript:
+        return transcript
+
+    recording_id = payload.get("recording_id")
+    if not recording_id:
+        return []
+
+    fetched = await fathom_client.get_transcript(
+        api_key=user.fathom_api_key_encrypted,
+        recording_id=int(recording_id),
+    )
+    if fetched:
+        payload["transcript"] = fetched
+    return fetched
+
+
 async def next_clickup_sequence(session: AsyncSession, prefix: str) -> int:
     await session.execute(
         text(
@@ -458,8 +504,10 @@ async def process_meeting_payload(
     user: User,
     payload: dict[str, Any],
     clickup: ClickupClient | None = None,
+    fathom: FathomClient | None = None,
 ) -> str:
     clickup_client = clickup or ClickupClient()
+    fathom_client = fathom or FathomClient()
     settings = get_settings()
 
     recording_id = int(payload["recording_id"])
@@ -480,6 +528,8 @@ async def process_meeting_payload(
         return str(existing_task_id)
 
     try:
+        await _ensure_payload_transcript(payload, user, fathom_client)
+
         if _is_good_fathom_summary(payload):
             summary_md = _strip_fathom_timestamp_links(payload["default_summary"]["markdown_formatted"])
             summary_source = "fathom_ai"
@@ -589,6 +639,19 @@ async def process_meeting_payload(
                     name=_format_action_checklist_item_name(task_ref, index, item),
                     orderindex=index - 1,
                 )
+
+        try:
+            transcript = payload.get("transcript")
+            if isinstance(transcript, list) and transcript:
+                await clickup_client.upload_task_attachment(
+                    clickup_token=clickup_token,
+                    task_id=task_id,
+                    filename=f"fathom-transcript-{recording_id}.txt",
+                    content=_format_transcript_attachment(payload, transcript),
+                    content_type="text/plain; charset=utf-8",
+                )
+        except Exception as exc:
+            logger.warning("Could not upload transcript attachment for recording %s: %s", recording_id, exc)
 
         await mark_success(
             session=session,

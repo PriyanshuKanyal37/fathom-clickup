@@ -41,6 +41,15 @@ class FathomClient:
             if response.status_code not in (200, 204, 404):
                 response.raise_for_status()
 
+    async def get_transcript(self, api_key: str, recording_id: int) -> list[dict[str, Any]]:
+        headers = {"X-Api-Key": api_key}
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(f"{FATHOM_BASE_URL}/recordings/{recording_id}/transcript", headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            transcript = data.get("transcript") if isinstance(data, dict) else None
+            return transcript if isinstance(transcript, list) else []
+
 
 def _decode_webhook_secret(secret: str) -> bytes:
     encoded = secret[6:] if secret.startswith("whsec_") else secret
@@ -87,4 +96,3 @@ def verify_signature(
     provided = _extract_signatures(webhook_signature)
 
     return any(hmac.compare_digest(expected, sig) for sig in provided)
-
