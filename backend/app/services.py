@@ -143,6 +143,37 @@ def _is_full_name(name: str | None) -> bool:
     return len(_normalize_name(name).split()) >= 2
 
 
+def _member_name_indexes(members: list[dict[str, Any]]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+    full_name_to_ids: dict[str, list[int]] = {}
+    first_name_to_ids: dict[str, list[int]] = {}
+    for member in members:
+        member_id = member.get("id")
+        if member_id is None:
+            continue
+        full_name = _normalize_name(member.get("username"))
+        if not _is_full_name(full_name):
+            continue
+        mid = int(member_id)
+        full_name_to_ids.setdefault(full_name, []).append(mid)
+        first_name_to_ids.setdefault(full_name.split()[0], []).append(mid)
+    return full_name_to_ids, first_name_to_ids
+
+
+def _only_id(ids: list[int] | None) -> int | None:
+    return ids[0] if ids and len(ids) == 1 else None
+
+
+def _match_structured_name_to_member_id(name: str | None, members: list[dict[str, Any]]) -> int | None:
+    normalized = _normalize_name(name)
+    if not normalized:
+        return None
+
+    full_name_to_ids, first_name_to_ids = _member_name_indexes(members)
+    if _is_full_name(normalized):
+        return _only_id(full_name_to_ids.get(normalized))
+    return _only_id(first_name_to_ids.get(normalized))
+
+
 def _build_content_text(payload: dict[str, Any], summary_md: str) -> str:
     parts: list[str] = [summary_md or ""]
     for row in payload.get("transcript") or []:
@@ -193,40 +224,17 @@ def _match_owner_to_member_id(
     if not members:
         return None
 
-    normalized = _normalize_name(name)
-    if not _is_full_name(normalized):
-        return None
-
-    for m in members:
-        full = _normalize_name(m.get("username"))
-        if _is_full_name(full) and full == normalized:
-            mid = m.get("id")
-            if mid is not None:
-                return int(mid)
-
-    return None
+    return _match_structured_name_to_member_id(name, members)
 
 
 def _match_attendees_to_members(
     attendees: list[dict[str, Any]],
     members: list[dict[str, Any]],
 ) -> list[int]:
-    name_to_id: dict[str, int] = {}
-    for m in members:
-        mid = m.get("id")
-        if mid is None:
-            continue
-        name = _normalize_name(m.get("username"))
-        if _is_full_name(name):
-            name_to_id[name] = int(mid)
-
     matched: list[int] = []
     seen: set[int] = set()
     for attendee in attendees:
-        name = _normalize_name(attendee.get("name"))
-        member_id: int | None = None
-        if _is_full_name(name) and name in name_to_id:
-            member_id = name_to_id[name]
+        member_id = _match_structured_name_to_member_id(attendee.get("name"), members)
         if member_id is not None and member_id not in seen:
             matched.append(member_id)
             seen.add(member_id)

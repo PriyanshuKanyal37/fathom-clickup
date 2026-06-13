@@ -25,9 +25,9 @@ def test_full_name_case_insensitive_and_whitespace():
     assert _match_owner_to_member_id("  shivam   chandhok  ", None, MEMBERS) == 192213754
 
 
-def test_owner_does_not_match_first_name_only():
-    assert _match_owner_to_member_id("Shivam", None, MEMBERS) is None
-    assert _match_owner_to_member_id("Priyanshu", None, MEMBERS) is None
+def test_owner_matches_unique_first_name_only():
+    assert _match_owner_to_member_id("Shivam", None, MEMBERS) == 192213754
+    assert _match_owner_to_member_id("Priyanshu", None, MEMBERS) == 95349668
     assert _match_owner_to_member_id("Priyanshu Rijhwani", None, MEMBERS) is None
 
 
@@ -64,13 +64,13 @@ def test_empty_member_list():
     assert _match_owner_to_member_id("Shivam", None, []) is None
 
 
-def test_attendees_match_exact_full_name_only():
+def test_attendees_match_exact_full_name_or_unique_first_name():
     assert _match_attendees_to_members([{"name": "Vansh Raj", "email": None}], MEMBERS) == [95349667]
+    assert _match_attendees_to_members([{"name": "Shivam", "email": None}], MEMBERS) == [192213754]
     assert _match_attendees_to_members([{"name": "Priyanshu Rijhwani", "email": None}], MEMBERS) == []
 
 
-def test_attendees_do_not_match_by_email_or_first_name():
-    assert _match_attendees_to_members([{"name": "Shivam", "email": "shivam@theladder.ai"}], MEMBERS) == []
+def test_attendees_do_not_match_by_email_without_name():
     assert _match_attendees_to_members([{"name": None, "email": "vansh@theladder.ai"}], MEMBERS) == []
 
 
@@ -80,3 +80,4 @@ def test_content_matches_exact_full_name_only():
         95349667,
     ]
     assert _match_content_to_members("Priyanshu Rijhwani will review this with Shivam.", MEMBERS) == []
+    assert _match_content_to_members("Shivam will review this.", MEMBERS) == []
