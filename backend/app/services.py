@@ -163,15 +163,15 @@ def _only_id(ids: list[int] | None) -> int | None:
     return ids[0] if ids and len(ids) == 1 else None
 
 
-def _match_structured_name_to_member_id(name: str | None, members: list[dict[str, Any]]) -> int | None:
+def _match_structured_name_to_member_ids(name: str | None, members: list[dict[str, Any]]) -> list[int]:
     normalized = _normalize_name(name)
     if not normalized:
-        return None
+        return []
 
     full_name_to_ids, first_name_to_ids = _member_name_indexes(members)
     if _is_full_name(normalized):
-        return _only_id(full_name_to_ids.get(normalized))
-    return _only_id(first_name_to_ids.get(normalized))
+        return full_name_to_ids.get(normalized) or []
+    return first_name_to_ids.get(normalized) or []
 
 
 def _build_content_text(payload: dict[str, Any], summary_md: str) -> str:
@@ -224,7 +224,7 @@ def _match_owner_to_member_id(
     if not members:
         return None
 
-    return _match_structured_name_to_member_id(name, members)
+    return _only_id(_match_structured_name_to_member_ids(name, members))
 
 
 def _match_attendees_to_members(
@@ -234,10 +234,10 @@ def _match_attendees_to_members(
     matched: list[int] = []
     seen: set[int] = set()
     for attendee in attendees:
-        member_id = _match_structured_name_to_member_id(attendee.get("name"), members)
-        if member_id is not None and member_id not in seen:
-            matched.append(member_id)
-            seen.add(member_id)
+        for member_id in _match_structured_name_to_member_ids(attendee.get("name"), members):
+            if member_id not in seen:
+                matched.append(member_id)
+                seen.add(member_id)
     return matched
 
 

@@ -8,6 +8,10 @@ MEMBERS = [
     {"id": 95349667, "username": "Vansh Raj", "email": "vansh@theladder.ai"},
 ]
 
+DUPLICATE_FIRST_NAME_MEMBERS = MEMBERS + [
+    {"id": 99999, "username": "Shivam Other", "email": "other@example.com"},
+]
+
 
 def test_owner_does_not_match_by_email_only():
     assert _match_owner_to_member_id("someone else", "shivam@theladder.ai", MEMBERS) is None
@@ -43,12 +47,9 @@ def test_no_match_empty_inputs():
 
 
 def test_ambiguous_first_name_returns_none():
-    members_with_duplicate_first = MEMBERS + [
-        {"id": 99999, "username": "Shivam Other", "email": "other@example.com"},
-    ]
-    assert _match_owner_to_member_id("Shivam", None, members_with_duplicate_first) is None
+    assert _match_owner_to_member_id("Shivam", None, DUPLICATE_FIRST_NAME_MEMBERS) is None
     assert (
-        _match_owner_to_member_id("Shivam Chandhok", None, members_with_duplicate_first)
+        _match_owner_to_member_id("Shivam Chandhok", None, DUPLICATE_FIRST_NAME_MEMBERS)
         == 192213754
     )
 
@@ -68,6 +69,13 @@ def test_attendees_match_exact_full_name_or_unique_first_name():
     assert _match_attendees_to_members([{"name": "Vansh Raj", "email": None}], MEMBERS) == [95349667]
     assert _match_attendees_to_members([{"name": "Shivam", "email": None}], MEMBERS) == [192213754]
     assert _match_attendees_to_members([{"name": "Priyanshu Rijhwani", "email": None}], MEMBERS) == []
+
+
+def test_attendees_match_all_members_with_same_first_name():
+    assert _match_attendees_to_members([{"name": "Shivam", "email": None}], DUPLICATE_FIRST_NAME_MEMBERS) == [
+        192213754,
+        99999,
+    ]
 
 
 def test_attendees_do_not_match_by_email_without_name():
