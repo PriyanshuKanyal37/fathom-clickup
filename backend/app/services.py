@@ -139,6 +139,10 @@ def _normalize_name(name: str | None) -> str:
     return " ".join(name.strip().lower().split())
 
 
+def _is_full_name(name: str | None) -> bool:
+    return len(_normalize_name(name).split()) >= 2
+
+
 def _build_content_text(payload: dict[str, Any], summary_md: str) -> str:
     parts: list[str] = [summary_md or ""]
     for row in payload.get("transcript") or []:
@@ -159,14 +163,6 @@ def _match_content_to_members(content: str, members: list[dict[str, Any]]) -> li
     if not content or not members:
         return []
 
-    first_name_counts: dict[str, int] = {}
-    for m in members:
-        full = _normalize_name(m.get("username"))
-        if not full:
-            continue
-        first = full.split()[0]
-        first_name_counts[first] = first_name_counts.get(first, 0) + 1
-
     matched: list[int] = []
     seen: set[int] = set()
     for m in members:
@@ -174,19 +170,12 @@ def _match_content_to_members(content: str, members: list[dict[str, Any]]) -> li
         if mid is None:
             continue
         full = _normalize_name(m.get("username"))
-        if not full:
+        if not _is_full_name(full):
             continue
-        first = full.split()[0]
-        hit = False
         if re.search(rf"\b{re.escape(full)}\b", content, re.IGNORECASE):
-            hit = True
-        elif first_name_counts.get(first, 0) == 1 and re.search(
-            rf"\b{re.escape(first)}\b", content, re.IGNORECASE
-        ):
-            hit = True
-        if hit and int(mid) not in seen:
-            matched.append(int(mid))
-            seen.add(int(mid))
+            if int(mid) not in seen:
+                matched.append(int(mid))
+                seen.add(int(mid))
     return matched
 
 
@@ -197,50 +186,23 @@ def _match_owner_to_member_id(
 ) -> int | None:
     """Resolve an action-item owner (name and/or email) to a single ClickUp member id.
 
-    Returns None when there is no confident match. Tiers, most reliable first:
-      1. Email exact match (case-insensitive)
-      2. Full-name exact match (case-insensitive, whitespace-normalised)
-      3. First-name match, only if that first name is unique in the workspace
-    Ambiguous first names fall through to None rather than guessing.
+    Returns None when there is no exact full-name match. Email-only and first-name
+    matches are intentionally skipped because Fathom attendees can share first
+    names or expose emails that do not map to the intended ClickUp member.
     """
     if not members:
         return None
 
-    if email:
-        email_lc = email.strip().lower()
-        if email_lc:
-            for m in members:
-                if (m.get("email") or "").strip().lower() == email_lc:
-                    mid = m.get("id")
-                    if mid is not None:
-                        return int(mid)
-
     normalized = _normalize_name(name)
-    if not normalized:
+    if not _is_full_name(normalized):
         return None
 
     for m in members:
         full = _normalize_name(m.get("username"))
-        if full and full == normalized:
+        if _is_full_name(full) and full == normalized:
             mid = m.get("id")
             if mid is not None:
                 return int(mid)
-
-    first_name_counts: dict[str, int] = {}
-    for m in members:
-        full = _normalize_name(m.get("username"))
-        if full:
-            first = full.split()[0]
-            first_name_counts[first] = first_name_counts.get(first, 0) + 1
-
-    input_first = normalized.split()[0]
-    if first_name_counts.get(input_first, 0) == 1:
-        for m in members:
-            full = _normalize_name(m.get("username"))
-            if full and full.split()[0] == input_first:
-                mid = m.get("id")
-                if mid is not None:
-                    return int(mid)
 
     return None
 
@@ -249,28 +211,21 @@ def _match_attendees_to_members(
     attendees: list[dict[str, Any]],
     members: list[dict[str, Any]],
 ) -> list[int]:
-    email_to_id: dict[str, int] = {}
     name_to_id: dict[str, int] = {}
     for m in members:
         mid = m.get("id")
         if mid is None:
             continue
-        email = (m.get("email") or "").strip().lower()
-        if email:
-            email_to_id[email] = int(mid)
         name = _normalize_name(m.get("username"))
-        if name:
+        if _is_full_name(name):
             name_to_id[name] = int(mid)
 
     matched: list[int] = []
     seen: set[int] = set()
     for attendee in attendees:
-        email = (attendee.get("email") or "").strip().lower()
         name = _normalize_name(attendee.get("name"))
         member_id: int | None = None
-        if email and email in email_to_id:
-            member_id = email_to_id[email]
-        elif name and name in name_to_id:
+        if _is_full_name(name) and name in name_to_id:
             member_id = name_to_id[name]
         if member_id is not None and member_id not in seen:
             matched.append(member_id)
